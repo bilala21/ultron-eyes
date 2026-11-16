@@ -27,7 +27,11 @@ Write-Host "Testing cameras once..."
 uv run ultron-eyes scan
 
 $uv = (Get-Command uv).Source
-$action = New-ScheduledTaskAction -Execute $uv -Argument "run ultron-eyes run" -WorkingDirectory $Project
+# Run hidden (no console window to close by accident); output goes to data\run.log.
+New-Item -ItemType Directory -Force "$Project\data" | Out-Null
+$cmd = "& '$uv' run ultron-eyes run *> '$Project\data\run.log'"
+$action = New-ScheduledTaskAction -Execute "powershell.exe" `
+    -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command `"$cmd`"" -WorkingDirectory $Project
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
     -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -Priority 7
