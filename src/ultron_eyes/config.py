@@ -42,6 +42,8 @@ class Config:
     retention_days: int = 14
     cooldown_seconds: int = 20
     burst_frames: int = 3  # snapshots per motion event; the best one is kept
+    active_interval_seconds: float = 4  # re-check a camera this often while its motion sensor stays on
+    max_active_seconds: int = 180  # stop re-checking after this (sensor stuck on)
     min_confidence: float = 0.5
     labels: list[str] = field(default_factory=lambda: [
         "person", "car", "truck", "bus", "motorcycle", "bicycle", "dog", "cat", "backpack", "handbag", "suitcase",
@@ -78,6 +80,8 @@ def load(path: str | os.PathLike = "config.yaml") -> Config:
         retention_days=int(raw.get("retention_days", 14)),
         cooldown_seconds=int(raw.get("cooldown_seconds", 20)),
         burst_frames=int(raw.get("burst_frames", 3)),
+        active_interval_seconds=float(raw.get("active_interval_seconds", 4)),
+        max_active_seconds=int(raw.get("max_active_seconds", 180)),
         min_confidence=float(raw.get("min_confidence", 0.5)),
         gemini_api_key=_env_or(raw.get("gemini_api_key"), "GEMINI_API_KEY"),
         web_host=raw.get("web", {}).get("host", "127.0.0.1"),

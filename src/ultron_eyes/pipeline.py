@@ -27,6 +27,7 @@ log = logging.getLogger("ultron_eyes")
 
 # Things that move matter more than things that are always there (parked cars, bikes).
 PRIORITY = {"person": 100, "dog": 30, "cat": 30, "motorcycle": 5, "bicycle": 2}
+MOVING = {"person", "dog", "cat"}
 
 
 def frame_score(a) -> tuple:
@@ -45,8 +46,12 @@ class Pipeline:
         self.store = store
         self.vision = vision or Vision(cfg.labels, cfg.min_confidence, read_plates=any(c.plates for c in cfg.cameras))
         self.nvr = nvr or NVR(cfg.nvr_host, cfg.nvr_user, cfg.nvr_password, cfg.nvr_port)
-        self.jobs: queue.Queue[tuple[int, float]] = queue.Queue(maxsize=50)
+        self.jobs: queue.Queue[tuple[int, float, bool]] = queue.Queue(maxsize=50)
         self.last_trigger: dict[int, float] = {}
+        self.active: dict[int, float] = {}        # channel -> when its motion sensor turned on
+        self.last_sample: dict[int, float] = {}   # channel -> last time a frame was analyzed
+        self.pending: set[int] = set()            # channels with a job waiting in the queue
+        self.last_saved: dict[int, tuple[float, frozenset, frozenset, frozenset]] = {}
         self.listeners = []  # callables(event_dict) for live updates / notifications
         self._lower_priority()
 
@@ -63,26 +68,79 @@ class Pipeline:
             pass
 
     # ---- triggers ----
-    def trigger(self, channel: int, ts: float | None = None) -> bool:
+    def trigger(self, channel: int, ts: float | None = None, follow_up: bool = False) -> bool:
+        """Queue a look at a camera. A new motion start always gets a burst; follow-ups
+        (while the sensor stays on) are single frames and are skipped if one is already queued."""
         ts = ts or time.time()
-        if ts - self.last_trigger.get(channel, 0) < self.cfg.cooldown_seconds:
+        if channel in self.pending:
             return False
+        if not follow_up and ts - self.last_trigger.get(channel, 0) < 2:
+            return False  # duplicate "on" from a flapping sensor
         self.last_trigger[channel] = ts
         try:
-            self.jobs.put_nowait((channel, ts))
+            self.jobs.put_nowait((channel, ts, follow_up))
+            self.pending.add(channel)
             return True
         except queue.Full:
             log.warning("queue full, dropping motion on channel %s", channel)
             return False
 
+    def motion(self, channel: int, on: bool, ts: float | None = None) -> None:
+        ts = ts or time.time()
+        if on:
+            self.active.setdefault(channel, ts)
+            self.trigger(channel, ts)
+        else:
+            self.active.pop(channel, None)
+
+    def follow_up_tick(self, now: float | None = None) -> None:
+        """Motion sensors can stay "on" for minutes (someone opens the door, then walks in
+        a minute later). Keep sampling active cameras every few seconds while they stay on."""
+        now = now or time.time()
+        for ch, since in list(self.active.items()):
+            if now - since > self.cfg.max_active_seconds:
+                self.active.pop(ch, None)  # sensor stuck on; wait for the next real "on"
+                continue
+            if now - self.last_sample.get(ch, 0) >= self.cfg.active_interval_seconds:
+                self.trigger(ch, now, follow_up=True)
+
+    def should_save(self, channel: int, analysis, follow_up: bool, now: float) -> bool:
+        """Save new information, not 50 copies of a parked car.
+        Moving things (people, animals) and new plates are what matter; parked objects only
+        matter when the set of them changes (a car arrived or left) on a fresh motion start."""
+        labels = set(analysis.labels)
+        moving = frozenset(labels & MOVING)
+        static = frozenset(labels - MOVING)
+        plates = frozenset(p.text for p in analysis.plates)
+        last = self.last_saved.get(channel)
+        if last is None:
+            return bool(labels)
+        t, last_moving, last_static, last_plates = last
+        if moving - last_moving or plates - last_plates:
+            return True  # someone/something new appeared, or a new plate was read
+        if moving and now - t >= self.cfg.cooldown_seconds:
+            return True  # still activity; one event per cooldown
+        if not follow_up and static != last_static:
+            return True  # a car arrived or left
+        return not follow_up and bool(labels) and now - t >= 600
+
     # ---- worker ----
-    def process(self, channel: int, ts: float) -> dict | None:
+    def process(self, channel: int, ts: float, follow_up: bool = False) -> dict | None:
         cam = self.cfg.camera(channel)
         name = cam.name if cam else f"Cam {channel}"
-        jpeg, img, analysis = self.best_frame(channel, plates=bool(cam and cam.plates))
+        self.last_sample[channel] = time.time()
+        jpeg, img, analysis = self.best_frame(channel, plates=bool(cam and cam.plates),
+                                              frames=1 if follow_up else self.cfg.burst_frames)
         if not analysis.objects:
-            log.info("cam %s: motion but nothing recognized", channel)
+            if not follow_up:
+                log.info("cam %s: motion but nothing recognized", channel)
             return None
+        if not self.should_save(channel, analysis, follow_up, time.time()):
+            log.debug("cam %s: nothing new (%s)", channel, analysis.labels)
+            return None
+        labels = set(analysis.labels)
+        self.last_saved[channel] = (time.time(), frozenset(labels & MOVING), frozenset(labels - MOVING),
+                                    frozenset(p.text for p in analysis.plates))
         latency = int((time.time() - ts) * 1000)
         event_id = self.store.add(ts, channel, name, jpeg, img, analysis, latency)
         event = self.store.get(event_id)
@@ -95,16 +153,17 @@ class Pipeline:
                 log.exception("listener failed")
         return event
 
-    def best_frame(self, channel: int, plates: bool):
+    def best_frame(self, channel: int, plates: bool, frames: int | None = None):
         """Motion alerts arrive a moment after the motion starts, and a full-resolution
         snapshot takes ~1.5 s, so a single frame often misses whoever caused the motion.
         Grab a short burst and keep the most informative frame."""
         best = None
-        for i in range(max(1, self.cfg.burst_frames)):
+        frames = max(1, frames or self.cfg.burst_frames)
+        for i in range(frames):
             try:
                 jpeg, img = self.nvr.snapshot(channel)
             except Exception as e:
-                if best is None and i == self.cfg.burst_frames - 1:
+                if best is None and i == frames - 1:
                     raise
                 log.debug("cam %s burst frame %d failed: %s", channel, i, e)
                 continue
@@ -125,12 +184,14 @@ class Pipeline:
                 if removed:
                     log.info("retention: deleted %d events older than %d days", removed, self.cfg.retention_days)
                 last_purge = time.time()
+            self.follow_up_tick()
             try:
-                channel, ts = self.jobs.get(timeout=1)
+                channel, ts, follow_up = self.jobs.get(timeout=1)
             except queue.Empty:
                 continue
+            self.pending.discard(channel)
             try:
-                self.process(channel, ts)
+                self.process(channel, ts, follow_up)
             except Exception as e:
                 log.warning("cam %s: failed (%s: %s)", channel, type(e).__name__, e)
 
@@ -151,16 +212,17 @@ class Pipeline:
                         return
                     await ws.send(json.dumps({
                         "id": 1, "type": "subscribe_trigger",
-                        "trigger": {"platform": "state", "entity_id": list(entity_to_channel), "to": "on"},
+                        "trigger": {"platform": "state", "entity_id": list(entity_to_channel)},
                     }))
                     log.info("listening to %d motion sensors", len(entity_to_channel))
                     async for raw in ws:
                         msg = json.loads(raw)
                         if msg.get("type") != "event":
                             continue
-                        entity = msg["event"]["variables"]["trigger"]["entity_id"]
-                        if entity in entity_to_channel:
-                            self.trigger(entity_to_channel[entity])
+                        trig = msg["event"]["variables"]["trigger"]
+                        entity, state = trig["entity_id"], (trig.get("to_state") or {}).get("state")
+                        if entity in entity_to_channel and state in ("on", "off"):
+                            self.motion(entity_to_channel[entity], state == "on")
                         if stop.is_set():
                             break
             except Exception as e:
