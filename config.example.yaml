@@ -30,6 +30,7 @@ web:
   host: 127.0.0.1          # use 0.0.0.0 to open it to your home network (then set a token)
   port: 8765
   token: ""                # or env ULTRON_WEB_TOKEN; open the page once with ?key=TOKEN
+  allowed_hosts: []        # Host names the page is opened by, e.g. [192.168.1.20] when using 0.0.0.0
 
 # Optional: plain-English fallback through Gemini. Only the question TEXT is sent, never images.
 # gemini_api_key: ""       # or env GEMINI_API_KEY

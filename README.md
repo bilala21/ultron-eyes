@@ -54,7 +54,7 @@ flowchart LR
 | Faces | No face recognition. It only reports "person". |
 | Plates | Matched against **your own** known list. Unknown plates stay unknown; no owner lookups. |
 | Retention | Snapshots auto-delete after 14 days (configurable). |
-| Web UI | Binds to `127.0.0.1` by default; a token is required to expose it on the LAN. |
+| Web UI | Binds to `127.0.0.1` by default; Host-header allowlist blocks DNS rebinding; cross-site POSTs are rejected; a token is required to expose it on the LAN. |
 | Secrets | `config.yaml` is git-ignored; credentials can come from environment variables. |
 | Shared PC | Runs at below-normal priority; models only run when something moves. |
 

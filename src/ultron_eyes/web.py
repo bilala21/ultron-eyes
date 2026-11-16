@@ -5,10 +5,11 @@ from __future__ import annotations
 import hmac
 from datetime import datetime
 from importlib import resources
-from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
 from .config import Config
@@ -21,8 +22,30 @@ class Review(BaseModel):
     note: str | None = None
 
 
+def allowed_hosts(cfg: Config) -> list[str]:
+    """Host header allowlist. Blocks DNS rebinding: a hostile website that points its own
+    domain at 127.0.0.1 still sends its own domain in the Host header and gets rejected."""
+    hosts = ["127.0.0.1", "localhost", "[::1]"]
+    if cfg.web_host not in ("127.0.0.1", "localhost", "0.0.0.0", "::"):
+        hosts.append(cfg.web_host)
+    hosts += cfg.web_allowed_hosts
+    return hosts
+
+
 def create_app(cfg: Config, store: Store, pipeline=None) -> FastAPI:
     app = FastAPI(title="Ultron Eyes", docs_url=None, redoc_url=None)
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts(cfg))
+
+    @app.middleware("http")
+    async def same_origin_writes(request: Request, call_next):
+        """Reject cross-site POSTs (CSRF), even when no token is configured."""
+        if request.method not in ("GET", "HEAD", "OPTIONS"):
+            site = request.headers.get("sec-fetch-site")
+            origin = request.headers.get("origin")
+            host = request.headers.get("host", "")
+            if site not in (None, "same-origin", "none") or (origin and urlsplit(origin).netloc != host):
+                return JSONResponse({"detail": "cross-site request blocked"}, status_code=403)
+        return await call_next(request)
 
     def auth(request: Request) -> None:
         if not cfg.web_token:

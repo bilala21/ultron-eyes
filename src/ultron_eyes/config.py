@@ -49,6 +49,7 @@ class Config:
     web_host: str = "127.0.0.1"
     web_port: int = 8765
     web_token: str | None = None  # required when the web UI listens on the LAN
+    web_allowed_hosts: list[str] = field(default_factory=list)  # extra Host names, e.g. the PC's LAN IP
     gemini_model: str = "gemini-2.5-flash"
 
     def camera(self, channel: int) -> Camera | None:
@@ -80,6 +81,7 @@ def load(path: str | os.PathLike = "config.yaml") -> Config:
         web_host=raw.get("web", {}).get("host", "127.0.0.1"),
         web_port=int(raw.get("web", {}).get("port", 8765)),
         web_token=_env_or(raw.get("web", {}).get("token"), "ULTRON_WEB_TOKEN"),
+        web_allowed_hosts=list(raw.get("web", {}).get("allowed_hosts", [])),
         gemini_model=raw.get("gemini_model", "gemini-2.5-flash"),
     )
     if "labels" in raw:
