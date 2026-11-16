@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[oc]
+build/
+dist/
+*.egg-info
+.venv
+.pytest_cache/
+
+# Private: never commit these
+config.yaml
+data/
+.scratch/
+*.jpg
+*.jpeg
+*.png
+!docs/*.png
+*.db
+*.sqlite
+.env

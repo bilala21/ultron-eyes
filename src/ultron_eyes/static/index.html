@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ultron Eyes</title>
+<style>
+:root{--bg:#0b0a09;--panel:#15120f;--line:#2a231c;--text:#efe6da;--dim:#9a8c7c;--amber:#ffb347;--amber2:#ff7a1a;--ok:#5fd38d;--bad:#ff6b6b}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(1200px 600px at 50% -200px,#2a1a08 0,var(--bg) 60%);color:var(--text);font:15px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100vh}
+header{display:flex;align-items:center;gap:14px;padding:22px 24px 8px;max-width:1200px;margin:auto}
+.orb{width:34px;height:34px;border-radius:50%;background:radial-gradient(circle at 35% 35%,#ffe2a8,var(--amber) 35%,var(--amber2) 70%,#3a1600);box-shadow:0 0 24px #ff8a2a88;animation:pulse 3s ease-in-out infinite}
+@keyframes pulse{50%{box-shadow:0 0 40px #ff8a2acc}}
+h1{font-size:20px;margin:0;letter-spacing:.12em;font-weight:700}
+h1 span{color:var(--amber)}
+.sub{color:var(--dim);font-size:13px;margin-left:auto}
+main{max-width:1200px;margin:auto;padding:8px 24px 40px}
+form{display:flex;gap:10px;margin-top:10px}
+input[type=search]{flex:1;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:12px;padding:14px 16px;font-size:16px;outline:none}
+input[type=search]:focus{border-color:var(--amber)}
+button{background:var(--amber);color:#1a0d00;border:0;border-radius:12px;padding:0 20px;font-weight:700;font-size:15px;cursor:pointer}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+.chip{background:transparent;color:var(--dim);border:1px solid var(--line);border-radius:999px;padding:6px 12px;font-weight:500;font-size:13px}
+.chip:hover{color:var(--amber);border-color:var(--amber)}
+#meta{color:var(--dim);font-size:13px;min-height:20px;margin:6px 0 14px}
+#meta b{color:var(--amber);font-weight:600}
+.warn{color:#ffcf7a}
+#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;cursor:pointer;transition:transform .12s,border-color .12s}
+.card:hover{transform:translateY(-2px);border-color:#5a4127}
+.card img{width:100%;aspect-ratio:16/9;object-fit:cover;display:block;background:#000}
+.card .info{padding:10px 12px}
+.row{display:flex;justify-content:space-between;gap:8px;font-size:13px;color:var(--dim)}
+.tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.tag{font-size:12px;padding:2px 8px;border-radius:6px;background:#2a1d10;color:var(--amber)}
+.plate{font:600 12px ui-monospace,Menlo,monospace;padding:2px 8px;border-radius:6px;background:#eee;color:#111}
+.plate.known{background:var(--ok);color:#062}
+.plate.unknown{background:#ffd5d5;color:#700}
+.empty{color:var(--dim);text-align:center;padding:60px 0}
+dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:16px;padding:0;max-width:min(1100px,96vw);width:100%}
+dialog::backdrop{background:#000c}
+.view{position:relative}
+.view img{width:100%;display:block}
+.view canvas{position:absolute;inset:0;width:100%;height:100%}
+.dbar{display:flex;align-items:center;gap:10px;padding:12px 16px;flex-wrap:wrap}
+.dbar .grow{flex:1}
+.rv{background:#222;color:var(--text);padding:8px 14px}
+.rv.ok{background:var(--ok);color:#042}.rv.bad{background:var(--bad);color:#300}
+.close{background:transparent;color:var(--dim);font-size:22px;padding:0 8px}
+footer{color:var(--dim);font-size:12px;text-align:center;padding:20px}
+@media (max-width:600px){header{padding:16px}main{padding:8px 16px 30px}.sub{display:none}}
+</style>
+</head>
+<body>
+<header><div class="orb"></div><h1>ULTRON <span>EYES</span></h1><div class="sub">private, on-device camera search</div></header>
+<main>
+  <form id="f"><input id="q" type="search" placeholder="Ask about your cameras, like: people at the front door last night" autocomplete="off"><button>Search</button></form>
+  <div class="chips" id="chips"></div>
+  <div id="meta"></div>
+  <div id="grid"></div>
+</main>
+<dialog id="dlg">
+  <div class="view"><img id="big" alt=""><canvas id="cv"></canvas></div>
+  <div class="dbar"><div class="grow" id="dinfo"></div>
+    <span style="color:var(--dim);font-size:13px">Was the AI right?</span>
+    <button class="rv" id="yes">Correct</button><button class="rv" id="no">Wrong</button>
+    <button class="close" id="x" aria-label="Close">&times;</button></div>
+</dialog>
+<footer id="foot"></footer>
+<script>
+const $ = s => document.querySelector(s);
+const EXAMPLES = ["everything today", "people last night", "cars in the driveway this week", "unknown cars this week", "anyone at the front door after 9pm", "dogs in the backyard"];
+$("#chips").innerHTML = EXAMPLES.map(e => `<button class="chip" type="button">${e}</button>`).join("");
+$("#chips").onclick = e => { if (e.target.classList.contains("chip")) { $("#q").value = e.target.textContent; run(); } };
+$("#f").onsubmit = e => { e.preventDefault(); run(); };
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const when = iso => { const d = new Date(iso); return d.toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"}) + " " + d.toLocaleTimeString([], {hour:"numeric",minute:"2-digit"}); };
+const plateTag = p => `<span class="plate ${p.known_name ? "known" : "unknown"}" title="${p.known_name ? esc(p.known_name) : "not on the known list"}">${esc(p.text)}${p.known_name ? " · " + esc(p.known_name) : ""}</span>`;
+let events = [], current = null;
+
+async function run() {
+  const q = $("#q").value.trim();
+  history.replaceState(null, "", q ? "?q=" + encodeURIComponent(q) : location.pathname);
+  $("#meta").textContent = "Searching...";
+  const r = await fetch("/api/search?q=" + encodeURIComponent(q));
+  if (r.status === 401) { $("#meta").textContent = "Locked. Open this page with ?key=YOUR_KEY once."; return; }
+  const d = await r.json(); events = d.events;
+  const u = d.understood.length ? "Looking for <b>" + d.understood.map(esc).join("</b> · <b>") + "</b>" : "Showing the most recent events";
+  $("#meta").innerHTML = `${u} &nbsp;·&nbsp; ${events.length} result${events.length === 1 ? "" : "s"}` + d.warnings.map(w => `<div class="warn">${esc(w)}</div>`).join("");
+  $("#grid").innerHTML = events.length ? events.map((e, i) => `
+    <div class="card" data-i="${i}"><img loading="lazy" src="/api/events/${e.id}/thumb" alt="">
+      <div class="info"><div class="row"><span>${esc(e.camera_name)}</span><span>${when(e.time)}</span></div>
+      <div class="tags">${e.labels.map(l => `<span class="tag">${esc(l)}</span>`).join("")}${e.plates.map(plateTag).join("")}</div></div></div>`).join("")
+    : `<div class="empty">Nothing matched. Try a wider time, like "this week".</div>`;
+  stats();
+}
+$("#grid").onclick = e => { const c = e.target.closest(".card"); if (c) open(events[+c.dataset.i]); };
+
+function open(e) {
+  current = e;
+  const img = $("#big");
+  img.onload = () => draw(e);
+  img.src = `/api/events/${e.id}/snapshot`;
+  $("#dinfo").innerHTML = `<b>${esc(e.camera_name)}</b> · ${when(e.time)}` + (e.latency_ms ? ` · <span style="color:var(--dim)">${(e.latency_ms/1000).toFixed(1)} s from motion</span>` : "") + `<div class="tags">${e.plates.map(plateTag).join("")}</div>`;
+  marks(e.review);
+  $("#dlg").showModal();
+}
+function draw(e) {
+  const img = $("#big"), cv = $("#cv"); cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+  const g = cv.getContext("2d"); g.lineWidth = Math.max(2, cv.width / 500); g.font = `${Math.max(16, cv.width / 70)}px system-ui`;
+  const box = (b, color, text) => { g.strokeStyle = color; g.strokeRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);
+    const w = g.measureText(text).width + 12, h = parseInt(g.font) + 8; g.fillStyle = color; g.fillRect(b.x1, Math.max(0, b.y1 - h), w, h);
+    g.fillStyle = "#111"; g.fillText(text, b.x1 + 6, Math.max(h - 6, b.y1 - 6)); };
+  e.objects.forEach(o => box(o.box, "#ffb347", `${o.label} ${Math.round(o.confidence * 100)}%`));
+  e.plates.forEach(p => box(p.box, p.known_name ? "#5fd38d" : "#ff6b6b", p.known_name || p.text));
+}
+function marks(v) { $("#yes").classList.toggle("ok", v === 1); $("#no").classList.toggle("bad", v === 0); }
+async function review(ok) {
+  await fetch(`/api/events/${current.id}/review`, {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({correct: ok})});
+  current.review = ok ? 1 : 0; marks(current.review); stats();
+}
+$("#yes").onclick = () => review(true); $("#no").onclick = () => review(false);
+$("#x").onclick = () => $("#dlg").close();
+$("#dlg").onclick = e => { if (e.target.id === "dlg") $("#dlg").close(); };
+async function stats() {
+  const s = await (await fetch("/api/stats")).json();
+  $("#foot").textContent = `${s.events} events stored` + (s.reviewed ? ` · ${s.reviewed} reviewed · ${Math.round(s.precision * 100)}% correct` : "") + (s.latency_ms_median ? ` · median ${(s.latency_ms_median / 1000).toFixed(1)} s motion-to-event` : "");
+}
+$("#q").value = new URLSearchParams(location.search).get("q") || "";
+run();
+</script>
+</body>
+</html>

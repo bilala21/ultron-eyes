@@ -1,0 +1,36 @@
+# Copy to config.yaml and fill in. config.yaml is git-ignored; never commit real values.
+
+nvr:                       # Hikvision NVR / DVR (ISAPI)
+  host: 192.168.1.64
+  port: 80
+  # Use a VIEW-ONLY NVR user. Prefer environment variables:
+  #   ULTRON_NVR_USER / ULTRON_NVR_PASSWORD
+  username: viewer
+  password: change-me
+
+home_assistant:            # optional: motion sensors trigger analysis
+  url: http://homeassistant.local
+  # Long-lived access token (Profile > Security). Prefer env var ULTRON_HA_TOKEN.
+  token: ""
+
+cameras:                   # channel = NVR channel number
+  - { channel: 1, name: Garage,         motion_entity: binary_sensor.nvr_channel_1_motion }
+  - { channel: 2, name: Driveway Left,  motion_entity: binary_sensor.nvr_channel_2_motion, plates: true }
+  - { channel: 3, name: Driveway Right, motion_entity: binary_sensor.nvr_channel_3_motion, plates: true }
+  - { channel: 4, name: Front Door,     motion_entity: binary_sensor.nvr_channel_4_motion }
+
+known_plates:              # cars the house should recognize by name
+  - { plate: ABC1234, name: Dad's Car }
+
+retention_days: 14         # snapshots older than this are deleted automatically
+cooldown_seconds: 20       # per camera, so one visitor doesn't create dozens of events
+min_confidence: 0.5
+
+web:
+  host: 127.0.0.1          # use 0.0.0.0 to open it to your home network (then set a token)
+  port: 8765
+  token: ""                # or env ULTRON_WEB_TOKEN; open the page once with ?key=TOKEN
+
+# Optional: plain-English fallback through Gemini. Only the question TEXT is sent, never images.
+# gemini_api_key: ""       # or env GEMINI_API_KEY
+# gemini_model: gemini-2.5-flash
