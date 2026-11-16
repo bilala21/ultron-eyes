@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import shutil
 import sqlite3
+import threading
 import time
+from functools import wraps
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -47,14 +49,27 @@ class Filter:
     limit: int = 200
 
 
+def locked(fn):
+    """One SQLite connection is shared by the camera worker and the web server's
+    thread pool; serialize access so concurrent requests can't corrupt its state."""
+    @wraps(fn)
+    def wrapper(self, *a, **kw):
+        with self.lock:
+            return fn(self, *a, **kw)
+    return wrapper
+
+
 class Store:
     def __init__(self, data_dir: Path):
+        self.lock = threading.RLock()
         self.data_dir = Path(data_dir)
         (self.data_dir / "snapshots").mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(self.data_dir / "events.db", check_same_thread=False)
         self.db.row_factory = sqlite3.Row
+        self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)
 
+    @locked
     def add(self, ts: float, camera: int, camera_name: str, jpeg: bytes, img: np.ndarray,
             analysis: Analysis, latency_ms: int | None = None) -> int:
         day = datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
@@ -75,6 +90,7 @@ class Store:
         self.db.commit()
         return cur.lastrowid
 
+    @locked
     def search(self, f: Filter) -> list[dict]:
         where, args = [], []
         if f.start is not None:
@@ -98,14 +114,17 @@ class Store:
             rows = [r for r in rows if any(f.plate_text in p["text"] for p in r["plates"])]
         return rows[: f.limit]
 
+    @locked
     def get(self, event_id: int) -> dict | None:
         r = self.db.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
         return self._row(r) if r else None
 
+    @locked
     def review(self, event_id: int, correct: bool, note: str | None = None) -> None:
         self.db.execute("UPDATE events SET review = ?, review_note = ? WHERE id = ?", (int(correct), note, event_id))
         self.db.commit()
 
+    @locked
     def stats(self) -> dict:
         q = self.db.execute
         reviewed = q("SELECT COUNT(*), SUM(review) FROM events WHERE review IS NOT NULL").fetchone()
@@ -119,6 +138,7 @@ class Store:
             "latency_ms_p95": lat[int(len(lat) * 0.95)] if lat else None,
         }
 
+    @locked
     def purge(self, retention_days: int) -> int:
         cutoff = time.time() - retention_days * 86400
         old = self.db.execute("SELECT id, snapshot, thumb FROM events WHERE ts < ?", (cutoff,)).fetchall()
