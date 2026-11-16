@@ -25,6 +25,19 @@ from .vision import Vision
 
 log = logging.getLogger("ultron_eyes")
 
+# Things that move matter more than things that are always there (parked cars, bikes).
+PRIORITY = {"person": 100, "dog": 30, "cat": 30, "motorcycle": 5, "bicycle": 2}
+
+
+def frame_score(a) -> tuple:
+    """Rank burst frames: people/animals first, then readable plates, then more objects, then confidence."""
+    return (
+        sum(PRIORITY.get(o.label, 0) for o in a.objects),
+        len(a.plates),
+        len(a.objects),
+        max((o.confidence for o in a.objects), default=0.0),
+    )
+
 
 class Pipeline:
     def __init__(self, cfg: Config, store: Store, vision: Vision | None = None, nvr: NVR | None = None):
@@ -66,8 +79,7 @@ class Pipeline:
     def process(self, channel: int, ts: float) -> dict | None:
         cam = self.cfg.camera(channel)
         name = cam.name if cam else f"Cam {channel}"
-        jpeg, img = self.nvr.snapshot(channel)
-        analysis = self.vision.analyze(img, self.cfg.known_plates, plates=bool(cam and cam.plates))
+        jpeg, img, analysis = self.best_frame(channel, plates=bool(cam and cam.plates))
         if not analysis.objects:
             log.info("cam %s: motion but nothing recognized", channel)
             return None
@@ -82,6 +94,28 @@ class Pipeline:
             except Exception:
                 log.exception("listener failed")
         return event
+
+    def best_frame(self, channel: int, plates: bool):
+        """Motion alerts arrive a moment after the motion starts, and a full-resolution
+        snapshot takes ~1.5 s, so a single frame often misses whoever caused the motion.
+        Grab a short burst and keep the most informative frame."""
+        best = None
+        for i in range(max(1, self.cfg.burst_frames)):
+            try:
+                jpeg, img = self.nvr.snapshot(channel)
+            except Exception as e:
+                if best is None and i == self.cfg.burst_frames - 1:
+                    raise
+                log.debug("cam %s burst frame %d failed: %s", channel, i, e)
+                continue
+            analysis = self.vision.analyze(img, self.cfg.known_plates, plates=plates)
+            if best is None or frame_score(analysis) > frame_score(best[2]):
+                best = (jpeg, img, analysis)
+            if "person" in analysis.labels and analysis.plates:
+                break  # can't do better than this
+        if best is None:
+            raise RuntimeError(f"cam {channel}: no snapshot")
+        return best
 
     def worker(self, stop: threading.Event) -> None:
         last_purge = 0.0

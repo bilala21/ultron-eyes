@@ -75,6 +75,7 @@ uv run ultron-eyes run                 # listen for motion and serve http://127.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\install_windows.ps1
+# later, to update: powershell -ExecutionPolicy Bypass -File scripts\update_windows.ps1
 ```
 
 Other commands:

@@ -24,6 +24,7 @@ known_plates:              # cars the house should recognize by name
 
 retention_days: 14         # snapshots older than this are deleted automatically
 cooldown_seconds: 20       # per camera, so one visitor doesn't create dozens of events
+burst_frames: 3            # snapshots per motion event (~1.5 s apart); the most informative one is kept
 min_confidence: 0.5
 
 web:

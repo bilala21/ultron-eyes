@@ -41,6 +41,7 @@ class Config:
     data_dir: Path = Path("data")
     retention_days: int = 14
     cooldown_seconds: int = 20
+    burst_frames: int = 3  # snapshots per motion event; the best one is kept
     min_confidence: float = 0.5
     labels: list[str] = field(default_factory=lambda: [
         "person", "car", "truck", "bus", "motorcycle", "bicycle", "dog", "cat", "backpack", "handbag", "suitcase",
@@ -76,6 +77,7 @@ def load(path: str | os.PathLike = "config.yaml") -> Config:
         data_dir=Path(raw.get("data_dir", "data")),
         retention_days=int(raw.get("retention_days", 14)),
         cooldown_seconds=int(raw.get("cooldown_seconds", 20)),
+        burst_frames=int(raw.get("burst_frames", 3)),
         min_confidence=float(raw.get("min_confidence", 0.5)),
         gemini_api_key=_env_or(raw.get("gemini_api_key"), "GEMINI_API_KEY"),
         web_host=raw.get("web", {}).get("host", "127.0.0.1"),
