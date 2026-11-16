@@ -7,6 +7,7 @@ $ErrorActionPreference = "Stop"
 $Project = (Resolve-Path "$PSScriptRoot\..").Path
 Set-Location $Project
 
+$env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     Write-Host "Installing uv..."
     powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"

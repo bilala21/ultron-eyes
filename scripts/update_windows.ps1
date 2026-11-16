@@ -2,6 +2,9 @@
 #   powershell -ExecutionPolicy Bypass -File scripts\update_windows.ps1
 $ErrorActionPreference = "Stop"
 $Project = (Resolve-Path "$PSScriptRoot\..").Path
+# uv's installer puts it here; windows opened before the install don't have it on PATH yet
+$env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
+if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { throw "uv not found. Run scripts\install_windows.ps1 first." }
 $tmp = Join-Path $env:TEMP "ultron-eyes-update"
 Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory $tmp | Out-Null
